@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RFID Dashboard</title>
+    <style>
+        :root {
+            --bg: #f4f7f6;
+            --card-bg: #ffffff;
+            --primary: #2563eb;
+            --present: #22c55e;
+            --absent: #ef4444;
+            --text: #1e293b;
+        }
+
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        
+        /* Grid pro karty uživatelů */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+        
+        .card { 
+            background: var(--card-bg); padding: 20px; border-radius: 12px; 
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); transition: transform 0.2s; cursor: pointer;
+        }
+        .card:hover { transform: translateY(-5px); }
+        
+        .status-dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .status-present { background-color: var(--present); box-shadow: 0 0 8px var(--present); }
+        .status-absent { background-color: var(--absent); }
+
+        /* Historie (Modal nebo sekce) */
+        #history-section { margin-top: 40px; background: white; padding: 20px; border-radius: 12px; display: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e2e8f0; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+        .badge-prichod { background: #dcfce7; color: #166534; }
+        .badge-odchod { background: #fee2e2; color: #991b1b; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>RFID Docházka</h1>
+        <button onclick="refreshData()">🔄 Obnovit</button>
+    </header>
+
+    <div id="user-grid" class="grid">
+        </div>
+
+    <div id="history-section">
+        <h2 id="history-title">Historie uživatele</h2>
+        <table id="history-table">
+            <thead>
+                <tr>
+                    <th>Typ</th>
+                    <th>Čas a datum</th>
+                </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const API_URL = ""; 
+    let selectedUid = null; // Uložíme si, koho zrovna prohlížíme
+    let historyInterval = null;
+
+    async function refreshData() {
+        try {
+            const [uidsRes, activeRes] = await Promise.all([
+                fetch('/uids'),
+                fetch('/active')
+            ]);
+            
+            const uidNames = await uidsRes.json();
+            const activeCards = await activeRes.json();
+
+            const grid = document.getElementById('user-grid');
+            grid.innerHTML = '';
+
+            for (const [uid, name] of Object.entries(uidNames)) {
+                const isPresent = activeCards.includes(uid);
+                
+                const card = document.createElement('div');
+                // Přidáme vizuální zvýraznění, pokud je karta vybraná
+                card.className = `card ${selectedUid === uid ? 'selected-card' : ''}`;
+                card.onclick = () => toggleHistory(uid, name);
+                card.innerHTML = `
+                    <div style="font-weight: bold; font-size: 1.2rem;">${name}</div>
+                    <div style="color: #64748b; font-size: 0.8rem; margin-bottom: 15px;">ID: ${uid}</div>
+                    <div>
+                        <span class="status-dot ${isPresent ? 'status-present' : 'status-absent'}"></span>
+                        ${isPresent ? 'V objektu' : 'Nepřítomen'}
+                    </div>
+                `;
+                grid.appendChild(card);
+            }
+
+            // Pokud máme otevřenou historii, aktualizujeme i ji
+            if (selectedUid) {
+                updateHistoryTable(selectedUid);
+            }
+        } catch (err) {
+            console.error("Chyba při načítání dat:", err);
+        }
+    }
+
+    function toggleHistory(uid, name) {
+        const section = document.getElementById('history-section');
+        
+        if (selectedUid === uid) {
+            // Pokud klikneme na stejnou kartu, zavřeme to
+            selectedUid = null;
+            section.style.display = 'none';
+        } else {
+            // Jinak přepneme na nové UID
+            selectedUid = uid;
+            document.getElementById('history-title').innerText = `Historie: ${name}`;
+            section.style.display = 'block';
+            updateHistoryTable(uid);
+            
+            // Scroll k historii jen při prvním otevření
+            section.scrollIntoView({ behavior: 'smooth' });
+        }
+        // Překreslíme karty, aby se projevilo zvýraznění (class selected-card)
+        refreshData(); 
+    }
+
+    async function updateHistoryTable(uid) {
+        try {
+            const res = await fetch(`/history/${uid}`);
+            const data = await res.json();
+            const body = document.getElementById('history-body');
+
+            // Vygenerujeme řádky
+            const rows = data.map(entry => {
+                const date = new Date(entry.time).toLocaleString('cs-CZ');
+                return `
+                    <tr>
+                        <td><span class="badge badge-${entry.type.toLowerCase()}">${entry.type}</span></td>
+                        <td>${date}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            body.innerHTML = rows || '<tr><td colspan="2">Žádné záznamy</td></tr>';
+        } catch (err) {
+            console.error("Chyba historie:", err);
+        }
+    }
+
+    // Intervaly
+    setInterval(refreshData, 2000); // Rychlejší refresh pro lepší odezvu (3s)
+    refreshData();
+</script>
+</body>
+</html>
